@@ -1,16 +1,24 @@
 config {
   type: "view",
   schema: "moca_metrics_int",
-  description: "Metriche aggregate per sessione. Grain: final_session_id.",
-  tags: [dataform.projectConfig.vars.client_name, "intermediate", "sessions"]
+  description: "Metriche aggregate per sessione. Grain: final_session_id (1 riga per sessione). Sostituisce 4_session_summary con grain corretto.",
+  tags: ["intermediate", "sessions"]
 }
+
+-- FIX CRITICO: nell'originale 4_session_summary il GROUP BY includeva referrer e ts
+-- del singolo evento, producendo N righe per sessione invece di 1.
+-- Qui si aggrega solo su final_session_id, garantendo il grain corretto.
 
 SELECT
   final_session_id,
+
+  -- Un solo visit_id per sessione (deterministico: una sessione appartiene a una visita)
   ANY_VALUE(visit_id)                       AS visit_id,
+
   MIN(ts)                                   AS session_start,
   MAX(ts)                                   AS session_end,
   TIMESTAMP_DIFF(MAX(ts), MIN(ts), SECOND)  AS session_duration_seconds,
+
   ANY_VALUE(device)                         AS device,
 
   COUNT(*)                                                              AS total_events,

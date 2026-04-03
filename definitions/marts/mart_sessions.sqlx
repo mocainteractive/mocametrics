@@ -1,23 +1,23 @@
 config {
   type: "table",
   schema: "moca_metrics",
-  description: "Sessioni con attribuzione canale. Grain: final_session_id. Tabella materializzata per Looker Studio.",
+  description: "Sessioni con attribuzione canale. Grain: final_session_id. Tabella materializzata per Looker Studio. Sostituisce looker_session.",
   bigquery: {
     partitionBy: "date",
     clusterBy: ["channel_group", "device"]
   },
-  tags: [dataform.projectConfig.vars.client_name, "mart", "sessions"]
+  tags: ["mart", "sessions"]
 }
 
 WITH base AS (
   SELECT
     s.final_session_id,
     s.visit_id,
-    DATE(s.session_start, dataform.projectConfig.vars.timezone)  AS date,
+    DATE(s.session_start, "Europe/Rome")                AS date,
     s.session_start,
     s.session_end,
-    LEAST(s.session_duration_seconds, CAST(dataform.projectConfig.vars.session_timeout AS INT64))
-                                                                  AS session_duration,
+    -- Cap a 1800s come nell'originale
+    LEAST(s.session_duration_seconds, 1800)             AS session_duration,
     s.device,
     s.total_events,
     s.total_revenue,
@@ -29,12 +29,14 @@ WITH base AS (
     s.has_view_item,
     s.has_add_to_cart,
     s.has_purchase,
+    -- Campi referrer grezzi (utili per debug e audit attribuzione)
     r.session_first_referrer,
     r.session_best_referrer,
     r.visit_first_referrer,
     r.visit_best_referrer,
     r.best_referrer_url,
     r.referral_domain,
+    -- Parametri UTM e click ID già estratti da int_referrer_resolution
     r.utm_source,
     r.utm_medium,
     r.utm_campaign,
@@ -51,6 +53,7 @@ with_source_medium AS (
   SELECT
     *,
 
+    -- SOURCE
     CASE
       WHEN utm_source IS NOT NULL
         THEN utm_source
@@ -73,6 +76,9 @@ with_source_medium AS (
       ELSE '(direct)'
     END AS source,
 
+    -- MEDIUM
+    -- FIX: aggiunto ELSE '(none)' esplicito per evitare NULL silenzioso che causava
+    -- channel_group = 'Unassigned' senza motivo apparente
     CASE
       WHEN utm_medium IS NOT NULL AND utm_medium != 'stories'
         THEN utm_medium
@@ -88,7 +94,7 @@ with_source_medium AS (
         THEN 'email'
       WHEN referral_domain IS NOT NULL
         AND utm_medium IS NULL
-        AND NOT REGEXP_CONTAINS(LOWER(best_referrer_url), r'' || dataform.projectConfig.vars.client_domain || '')
+        AND NOT REGEXP_CONTAINS(LOWER(best_referrer_url), r'bofrost\.it')
         AND utm_campaign IS NULL
         THEN 'referral'
       ELSE '(none)'

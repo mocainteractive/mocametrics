@@ -1,13 +1,19 @@
 config {
   type: "table",
   schema: "moca_metrics",
-  description: "Metriche prodotto aggregate. Grain: product_id + category + price + quantity + date.",
+  description: "Metriche prodotto aggregate. Grain: product_id + category + price + quantity + date. Sostituisce looker_products.",
   bigquery: {
     partitionBy: "date",
     clusterBy: ["product_id"]
   },
-  tags: [dataform.projectConfig.vars.client_name, "mart", "products"]
+  tags: ["mart", "products"]
 }
+
+-- FIX CRITICO offset colonne (formato confermato: id,name,category,price,quantity)
+--   product_price:    era SAFE_OFFSET(2) → corretto a SAFE_OFFSET(3)
+--   product_quantity: era SAFE_OFFSET(3) → corretto a SAFE_OFFSET(4)
+-- FIX: COALESCE(x, null, 0) → COALESCE(x, 0) (argomento null era inutile)
+-- FIX grain: aggregato per DATE con timezone, non per timestamp grezzo
 
 WITH events AS (
   SELECT
@@ -20,6 +26,7 @@ WITH events AS (
     AND TRIM(productInfo) != ''
 ),
 
+-- Split per prodotto (separatore ";")
 split_products AS (
   SELECT
     eventName,
@@ -30,11 +37,11 @@ split_products AS (
   WHERE TRIM(product_part) != ''
 ),
 
--- Formato: id,name,category,price,quantity
+-- Parsing campi — formato: id,name,category,price,quantity
 parsed AS (
   SELECT
     eventName,
-    DATE(ts, dataform.projectConfig.vars.timezone)                 AS date,
+    DATE(ts, "Europe/Rome")                                        AS date,
     SPLIT(product_raw, ',')[SAFE_OFFSET(0)]                        AS product_id,
     SPLIT(product_raw, ',')[SAFE_OFFSET(1)]                        AS product_name,
     SPLIT(product_raw, ',')[SAFE_OFFSET(2)]                        AS product_category,

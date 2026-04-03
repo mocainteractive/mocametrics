@@ -1,10 +1,11 @@
 config {
   type: "view",
   schema: "moca_metrics_int",
-  description: "Risoluzione referrer prioritario e estrazione UTM/click-ID. Grain: final_session_id.",
-  tags: [dataform.projectConfig.vars.client_name, "intermediate", "referrer", "attribution"]
+  description: "Risoluzione referrer prioritario e estrazione UTM/click-ID per sessione. Grain: final_session_id. Modello nuovo: centralizza la logica ripetuta 10x in looker_session originale.",
+  tags: ["intermediate", "referrer", "attribution"]
 }
 
+-- Bridge: per ogni sessione recupera il visit_id (necessario per join con int_referrer_by_visit)
 WITH session_visit_bridge AS (
   SELECT DISTINCT
     final_session_id,
@@ -12,6 +13,7 @@ WITH session_visit_bridge AS (
   FROM ${ref("stg_events_sessionized")}
 ),
 
+-- Join di tutti i referrer disponibili a livello di sessione
 all_referrers AS (
   SELECT
     s.final_session_id,
@@ -26,34 +28,46 @@ all_referrers AS (
   JOIN ${ref("int_referrer_by_visit")} v ON v.visit_id = b.visit_id
 ),
 
+-- Selezione prioritaria del referrer vincente — una sola volta per tutte le estrazioni downstream.
+-- Nell'originale questa logica era replicata identicamente 10 volte in looker_session
+-- (una per ogni parametro: best_referrer, referral_domain, utm_source, utm_medium,
+-- utm_campaign, gclid, fbclid, gbraid, wbraid, srsltid).
+--
+-- Priorità:
+--   1. session_first_referrer  con tracking params, non interno
+--   2. session_best_referrer   con tracking params, non interno
+--   3. visit_first_referrer    con tracking params, non interno
+--   4. visit_best_referrer     con tracking params, non interno
+--   5. Fallback: qualsiasi referrer non vuoto nello stesso ordine
 resolved AS (
   SELECT
     *,
     CASE
       WHEN session_first_referrer IS NOT NULL
         AND TRIM(session_first_referrer) != ''
-        AND NOT REGEXP_CONTAINS(LOWER(session_first_referrer), r'' || dataform.projectConfig.vars.client_domain || '')
+        AND NOT REGEXP_CONTAINS(LOWER(session_first_referrer), r'bofrost\.it')
         AND REGEXP_CONTAINS(session_first_referrer, r'(?i)(utm_|gclid|fbclid)')
       THEN session_first_referrer
 
       WHEN session_best_referrer IS NOT NULL
         AND TRIM(session_best_referrer) != ''
-        AND NOT REGEXP_CONTAINS(LOWER(session_best_referrer), r'' || dataform.projectConfig.vars.client_domain || '')
+        AND NOT REGEXP_CONTAINS(LOWER(session_best_referrer), r'bofrost\.it')
         AND REGEXP_CONTAINS(session_best_referrer, r'(?i)(utm_|gclid|fbclid)')
       THEN session_best_referrer
 
       WHEN visit_first_referrer IS NOT NULL
         AND TRIM(visit_first_referrer) != ''
-        AND NOT REGEXP_CONTAINS(LOWER(visit_first_referrer), r'' || dataform.projectConfig.vars.client_domain || '')
+        AND NOT REGEXP_CONTAINS(LOWER(visit_first_referrer), r'bofrost\.it')
         AND REGEXP_CONTAINS(visit_first_referrer, r'(?i)(utm_|gclid|fbclid)')
       THEN visit_first_referrer
 
       WHEN visit_best_referrer IS NOT NULL
         AND TRIM(visit_best_referrer) != ''
-        AND NOT REGEXP_CONTAINS(LOWER(visit_best_referrer), r'' || dataform.projectConfig.vars.client_domain || '')
+        AND NOT REGEXP_CONTAINS(LOWER(visit_best_referrer), r'bofrost\.it')
         AND REGEXP_CONTAINS(visit_best_referrer, r'(?i)(utm_|gclid|fbclid)')
       THEN visit_best_referrer
 
+      -- Fallback senza requisito tracking params
       WHEN session_first_referrer IS NOT NULL AND TRIM(session_first_referrer) != ''
         THEN session_first_referrer
       WHEN session_best_referrer IS NOT NULL AND TRIM(session_best_referrer) != ''
@@ -78,6 +92,7 @@ SELECT
   max_ts,
   best_referrer_url,
 
+  -- Dominio referral (decodifica URL parziale prima dell'estrazione)
   REGEXP_EXTRACT(
     LOWER(
       REPLACE(REPLACE(REPLACE(best_referrer_url, '%3A', ':'), '%2F', '/'), '%3F', '?')
@@ -85,19 +100,35 @@ SELECT
     r'https?://(?:www\.)?([^/?]+)'
   ) AS referral_domain,
 
-  SAFE.REGEXP_EXTRACT(best_referrer_url, r'utm_source(?:%3D|=)([^%&]*)')   AS utm_source,
-  SAFE.REGEXP_EXTRACT(best_referrer_url, r'utm_medium(?:%3D|=)([^%&]*)')   AS utm_medium,
+  -- UTM source
+  SAFE.REGEXP_EXTRACT(best_referrer_url, r'utm_source(?:%3D|=)([^%&]*)')
+    AS utm_source,
 
+  -- UTM medium
+  SAFE.REGEXP_EXTRACT(best_referrer_url, r'utm_medium(?:%3D|=)([^%&]*)')
+    AS utm_medium,
+
+  -- UTM campaign con decodifica URL completa (gestisce double encoding)
   CASE
     WHEN REGEXP_CONTAINS(best_referrer_url, r'utm_campaign(?:%3D|=)')
     THEN
       REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(
         SAFE.REGEXP_EXTRACT(best_referrer_url, r'utm_campaign(?:%3D|=)([^&]*?)(?:%26|&|$)'),
-        '%255B', '['), '%255D', ']'), '%2B', '+'), '%20', ' '), '%2C', ','),
-        '%7C', '|'), '%3A', ':'), '%2F', '/'), '%3F', '?'), '%23', '#'), '%2520', ' ')
+        '%255B', '['),
+        '%255D', ']'),
+        '%2B',   '+'),
+        '%20',   ' '),
+        '%2C',   ','),
+        '%7C',   '|'),
+        '%3A',   ':'),
+        '%2F',   '/'),
+        '%3F',   '?'),
+        '%23',   '#'),
+        '%2520', ' ')
     ELSE NULL
   END AS utm_campaign,
 
+  -- Click IDs
   SAFE.REGEXP_EXTRACT(best_referrer_url, r'gclid(?:%3D|=)([^%&]*)')    AS gclid,
   SAFE.REGEXP_EXTRACT(best_referrer_url, r'fbclid(?:%3D|=)([^%&]*)')   AS fbclid,
   SAFE.REGEXP_EXTRACT(best_referrer_url, r'gbraid(?:%3D|=)([^%&]*)')   AS gbraid,

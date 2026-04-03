@@ -1,7 +1,7 @@
 config {
   type: "assertion",
-  description: "Tutte le sessioni devono avere una data non nulla.",
-  tags: [dataform.projectConfig.vars.client_name, "assertions", "sessions"]
+  description: "Tutte le sessioni devono avere una data non nulla. NULL indica un problema nella conversione del timestamp in stg_events_sessionized.",
+  tags: ["assertions", "sessions"]
 }
 
 SELECT *

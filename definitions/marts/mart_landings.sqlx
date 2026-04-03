@@ -1,14 +1,22 @@
 config {
   type: "table",
   schema: "moca_metrics",
-  description: "Metriche di sessione per landing page. Grain: final_session_id.",
+  description: "Metriche di sessione per landing page. Grain: final_session_id. Sostituisce looker_landings.",
   bigquery: {
     partitionBy: "date",
     clusterBy: ["channel_group", "device"]
   },
-  tags: [dataform.projectConfig.vars.client_name, "mart", "landings"]
+  tags: ["mart", "landings"]
 }
 
+-- FIX CRITICO: nell'originale looker_landings c'era un doppio JOIN a looker_session
+-- (una volta nella CTE landing1 e una volta nel SELECT finale), con rischio concreto
+-- di moltiplicazione righe. Ora il JOIN a mart_sessions avviene una sola volta.
+--
+-- La logica landing page è estratta direttamente da stg_events_sessionized,
+-- eliminando il passaggio intermedio 0_landing_numbers + 1_landing_summary.
+
+-- Prima pagina vista per ogni sessione (= landing page)
 WITH session_landing AS (
   SELECT
     final_session_id,
@@ -20,10 +28,11 @@ WITH session_landing AS (
   GROUP BY final_session_id
 ),
 
+-- Metriche di sessione già a grain corretto da int_session_summary
 session_metrics AS (
   SELECT
     s.final_session_id,
-    DATE(s.session_start, dataform.projectConfig.vars.timezone)  AS date,
+    DATE(s.session_start, "Europe/Rome")  AS date,
     p.landing_page,
     s.device,
     s.total_events,
@@ -33,16 +42,17 @@ session_metrics AS (
     s.generate_lead_count,
     s.purchase_count,
     s.page_view_count,
-    1 AS session_count
+    1                                     AS session_count
   FROM ${ref("int_session_summary")} s
   JOIN session_landing p USING (final_session_id)
 )
 
+-- Arricchimento con dati di attribuzione — JOIN unico a mart_sessions
 SELECT
   m.*,
   ms.source,
   ms.medium,
-  ms.utm_campaign  AS campaign,
+  ms.utm_campaign                         AS campaign,
   ms.channel_group
 FROM session_metrics m
 LEFT JOIN ${ref("mart_sessions")} ms USING (final_session_id)

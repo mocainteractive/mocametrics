@@ -1,16 +1,22 @@
 config {
   type: "view",
   schema: "moca_metrics_int",
-  description: "Referrer migliore e primo per sessione. Grain: final_session_id.",
-  tags: [dataform.projectConfig.vars.client_name, "intermediate", "referrer"]
+  description: "Referrer migliore e primo per sessione. Grain: final_session_id. Sostituisce 1_referrer_by_session.",
+  tags: ["intermediate", "referrer"]
 }
+
+-- FIX: usa ARRAY_AGG con IGNORE NULLS e LIMIT 1 invece di estrarre l'array intero (più efficiente)
+-- FIX: usa SQL NULL invece della stringa sentinella 'NULL' dell'originale
+-- GRAIN: un record per final_session_id (garantito)
 
 SELECT
   final_session_id,
 
+  -- Primo referrer cronologicamente (qualsiasi valore non nullo)
   ARRAY_AGG(referrer IGNORE NULLS ORDER BY ts ASC LIMIT 1)[SAFE_OFFSET(0)]
     AS session_first_referrer,
 
+  -- Miglior referrer: primo in ordine cronologico con parametri di tracking
   ARRAY_AGG(
     CASE
       WHEN referrer IS NOT NULL

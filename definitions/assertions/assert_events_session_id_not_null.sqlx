@@ -1,0 +1,10 @@
+config {
+  type: "assertion",
+  description: "Tutti gli eventi in staging devono avere final_session_id non nulla. NULL indica un problema nella logica di sessionizzazione.",
+  tags: ["assertions", "staging"]
+}
+
+SELECT *
+FROM ${ref("stg_events_sessionized")}
+WHERE final_session_id IS NULL
+   OR TRIM(final_session_id) = ''

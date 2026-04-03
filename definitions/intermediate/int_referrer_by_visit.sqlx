@@ -1,16 +1,24 @@
 config {
   type: "view",
   schema: "moca_metrics_int",
-  description: "Referrer migliore e primo per visita. Grain: visit_id.",
-  tags: [dataform.projectConfig.vars.client_name, "intermediate", "referrer"]
+  description: "Referrer migliore e primo per visita (visit_id originale). Grain: visit_id. Sostituisce 2_referrer_by_visit.",
+  tags: ["intermediate", "referrer"]
 }
+
+-- FIX: filtro originale usava OR invece di AND — le righe con referrer vuoto '' non venivano escluse
+--   Originale: WHERE (visit_best_referrer <> '' OR visit_best_referrer IS NOT NULL)
+--   Corretto:  IGNORE NULLS + CASE che produce NULL per valori vuoti
+-- FIX: usa ARRAY_AGG con IGNORE NULLS e LIMIT 1
+-- GRAIN: un record per visit_id (garantito)
 
 SELECT
   visit_id,
 
+  -- Primo referrer cronologicamente
   ARRAY_AGG(referrer IGNORE NULLS ORDER BY ts ASC LIMIT 1)[SAFE_OFFSET(0)]
     AS visit_first_referrer,
 
+  -- Miglior referrer: primo in ordine cronologico con parametri di tracking o dominio Google
   ARRAY_AGG(
     CASE
       WHEN referrer IS NOT NULL

@@ -1,0 +1,25 @@
+config {
+  type: "assertion",
+  description: "channel_group deve contenere solo valori del vocabolario atteso. Valori fuori lista indicano un gap nella logica di attribuzione in mart_sessions.",
+  tags: ["assertions", "attribution"]
+}
+
+SELECT
+  final_session_id,
+  source,
+  medium,
+  channel_group
+FROM ${ref("mart_sessions")}
+WHERE channel_group NOT IN (
+  'Direct',
+  'Paid Search',
+  'Paid Social',
+  'Organic Search',
+  'Email',
+  'Organic Social',
+  'Referral',
+  'Affiliates',
+  'Display',
+  'Unassigned'
+)
+   OR channel_group IS NULL

@@ -1,17 +1,21 @@
 config {
   type: "table",
   schema: "moca_metrics",
-  description: "Visualizzazioni di pagina aggregate per data e dispositivo. Grain: page + date + device.",
+  description: "Visualizzazioni di pagina aggregate per data e dispositivo. Grain: page + date + device. Sostituisce looker_pages.",
   bigquery: {
     partitionBy: "date",
     clusterBy: ["device"]
   },
-  tags: [dataform.projectConfig.vars.client_name, "mart", "pages"]
+  tags: ["mart", "pages"]
 }
+
+-- FIX CRITICO: nell'originale looker_pages il GROUP BY includeva ts (timestamp grezzo
+-- non castato a data), risultando in quasi una riga per evento con page_view_count = 1.
+-- Ora si raggruppa per DATE con timezone corretta.
 
 SELECT
   REPLACE(page, '%2F', '/')                             AS page,
-  DATE(ts, dataform.projectConfig.vars.timezone)        AS date,
+  DATE(ts, "Europe/Rome")                               AS date,
   device,
   COUNT(CASE WHEN eventName = 'page_view' THEN 1 END)   AS page_view_count,
   COUNT(*)                                              AS total_events,

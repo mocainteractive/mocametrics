@@ -1,8 +1,8 @@
 config {
   type: "view",
   schema: "moca_metrics_staging",
-  description: "Eventi cookieless con sessionizzazione. Grain: evento.",
-  tags: [dataform.projectConfig.vars.client_name, "staging", "sessions"]
+  description: "Eventi cookieless con sessionizzazione a 30 minuti. Grain: evento. Sostituisce 0_landing_numbers e 0_session_numbers.",
+  tags: ["staging", "sessions"]
 }
 
 WITH raw AS (
@@ -16,13 +16,16 @@ WITH raw AS (
     revenue,
     customParameter,
     productInfo,
+    -- Numero di riga dentro ogni sessionId basato sull'ordine grezzo della stringa ts.
+    -- Usato come proxy di ordinamento prima che il timestamp sia castato.
     ROW_NUMBER() OVER (
       PARTITION BY sessionId
       ORDER BY ts
-    ) AS row_num
-  FROM ${ref(dataform.projectConfig.vars.source_table)}
+    )                        AS row_num
+  FROM ${ref("cookieless_raw_data")}
 ),
 
+-- Step 1: cast a INT64, producendo NULL per i valori 'undefined'
 ts_valid AS (
   SELECT
     *,
@@ -30,7 +33,9 @@ ts_valid AS (
   FROM raw
 ),
 
--- Propaga l'ultimo timestamp valido in avanti (gestisce N 'undefined' consecutivi)
+-- Step 2: propaga l'ultimo timestamp valido in avanti (gestisce N 'undefined' consecutivi)
+-- FIX rispetto all'originale: il LAG singolo non propagava correttamente sequenze
+-- consecutive di eventi senza timestamp valido
 ts_filled AS (
   SELECT
     *,
@@ -42,6 +47,7 @@ ts_filled AS (
   FROM ts_valid
 ),
 
+-- Step 3: cast a TIMESTAMP e scarta eventi ancora senza timestamp
 ts_cast AS (
   SELECT
     visit_id,
@@ -57,17 +63,19 @@ ts_cast AS (
   WHERE ts_int_filled IS NOT NULL
 ),
 
+-- Step 4: calcola il break di sessione
+-- FIX: aggiunta timezone Europe/Rome nel confronto date per evitare sessioni
+-- spezzate artificialmente a mezzanotte UTC invece che a mezzanotte italiana
 session_breaks AS (
   SELECT
     *,
     LAG(ts) OVER (PARTITION BY visit_id ORDER BY ts) AS previous_ts,
     IF(
       LAG(ts) OVER (PARTITION BY visit_id ORDER BY ts) IS NULL
-      OR TIMESTAMP_DIFF(ts, LAG(ts) OVER (PARTITION BY visit_id ORDER BY ts), SECOND)
-           > CAST(dataform.projectConfig.vars.session_timeout AS INT64)
-      OR DATE(ts, dataform.projectConfig.vars.timezone) != DATE(
+      OR TIMESTAMP_DIFF(ts, LAG(ts) OVER (PARTITION BY visit_id ORDER BY ts), SECOND) > 1800
+      OR DATE(ts, "Europe/Rome") != DATE(
            LAG(ts) OVER (PARTITION BY visit_id ORDER BY ts),
-           dataform.projectConfig.vars.timezone
+           "Europe/Rome"
          ),
       1,
       0
@@ -75,6 +83,7 @@ session_breaks AS (
   FROM ts_cast
 ),
 
+-- Step 5: contatore cumulativo di sessioni per visita
 session_numbered AS (
   SELECT
     *,
