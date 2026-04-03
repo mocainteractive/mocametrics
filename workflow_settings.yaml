@@ -1,0 +1,34 @@
+# ============================================================
+# MOCA INTERACTIVE — DATAFORM TEMPLATE
+# ============================================================
+# Unico file da modificare per ogni nuovo cliente.
+# Sostituisci i valori sotto con quelli del cliente.
+# ============================================================
+
+defaultProject: CLIENT_PROJECT_ID       # es. bofrost-data-import
+defaultLocation: EU
+defaultDataset: moca_metrics
+defaultAssertionDataset: moca_metrics_assertions
+
+vars:
+  # Identificativo cliente (usato nei tag e nei log)
+  client_name: CLIENT_NAME              # es. bofrost
+
+  # Progetto GCP dove si trova la raw table
+  source_project: CLIENT_PROJECT_ID     # es. bofrost-data-import
+
+  # Dataset BigQuery dove si trova la raw table
+  source_dataset: CLIENT_SOURCE_DATASET # es. moca_metrics
+
+  # Nome della tabella sorgente (di solito non cambia)
+  source_table: cookieless_raw_data
+
+  # Dominio del sito del cliente — usato per escludere traffico interno
+  # dal calcolo del referrer (es. bofrost.it, topfarmacia.it)
+  client_domain: CLIENT_DOMAIN          # es. bofrost.it
+
+  # Timezone del cliente per il calcolo delle date e delle sessioni
+  timezone: Europe/Rome
+
+  # Timeout sessione in secondi (default 30 minuti)
+  session_timeout: "1800"
