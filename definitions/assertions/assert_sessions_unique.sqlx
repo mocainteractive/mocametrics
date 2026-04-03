@@ -1,0 +1,10 @@
+config {
+  type: "assertion",
+  description: "mart_sessions deve avere esattamente una riga per final_session_id.",
+  tags: [dataform.projectConfig.vars.client_name, "assertions", "sessions"]
+}
+
+SELECT final_session_id, COUNT(*) AS cnt
+FROM ${ref("mart_sessions")}
+GROUP BY final_session_id
+HAVING cnt > 1

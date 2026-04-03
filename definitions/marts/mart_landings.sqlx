@@ -1,0 +1,48 @@
+config {
+  type: "table",
+  schema: "moca_metrics",
+  description: "Metriche di sessione per landing page. Grain: final_session_id.",
+  bigquery: {
+    partitionBy: "date",
+    clusterBy: ["channel_group", "device"]
+  },
+  tags: [dataform.projectConfig.vars.client_name, "mart", "landings"]
+}
+
+WITH session_landing AS (
+  SELECT
+    final_session_id,
+    REPLACE(
+      ARRAY_AGG(page IGNORE NULLS ORDER BY ts ASC LIMIT 1)[SAFE_OFFSET(0)],
+      '%2F', '/'
+    ) AS landing_page
+  FROM ${ref("stg_events_sessionized")}
+  GROUP BY final_session_id
+),
+
+session_metrics AS (
+  SELECT
+    s.final_session_id,
+    DATE(s.session_start, dataform.projectConfig.vars.timezone)  AS date,
+    p.landing_page,
+    s.device,
+    s.total_events,
+    s.total_revenue,
+    s.view_item_count,
+    s.add_to_cart_count,
+    s.generate_lead_count,
+    s.purchase_count,
+    s.page_view_count,
+    1 AS session_count
+  FROM ${ref("int_session_summary")} s
+  JOIN session_landing p USING (final_session_id)
+)
+
+SELECT
+  m.*,
+  ms.source,
+  ms.medium,
+  ms.utm_campaign  AS campaign,
+  ms.channel_group
+FROM session_metrics m
+LEFT JOIN ${ref("mart_sessions")} ms USING (final_session_id)

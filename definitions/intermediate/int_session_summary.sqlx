@@ -1,0 +1,29 @@
+config {
+  type: "view",
+  schema: "moca_metrics_int",
+  description: "Metriche aggregate per sessione. Grain: final_session_id.",
+  tags: [dataform.projectConfig.vars.client_name, "intermediate", "sessions"]
+}
+
+SELECT
+  final_session_id,
+  ANY_VALUE(visit_id)                       AS visit_id,
+  MIN(ts)                                   AS session_start,
+  MAX(ts)                                   AS session_end,
+  TIMESTAMP_DIFF(MAX(ts), MIN(ts), SECOND)  AS session_duration_seconds,
+  ANY_VALUE(device)                         AS device,
+
+  COUNT(*)                                                              AS total_events,
+  COALESCE(SUM(revenue), 0)                                            AS total_revenue,
+  COUNT(CASE WHEN eventName = 'view_item'     THEN 1 END)              AS view_item_count,
+  COUNT(CASE WHEN eventName = 'add_to_cart'   THEN 1 END)              AS add_to_cart_count,
+  COUNT(CASE WHEN eventName = 'generate_lead' THEN 1 END)              AS generate_lead_count,
+  COUNT(CASE WHEN eventName = 'purchase'      THEN 1 END)              AS purchase_count,
+  COUNT(CASE WHEN eventName = 'page_view'     THEN 1 END)              AS page_view_count,
+
+  MAX(CASE WHEN eventName = 'view_item'    THEN 1 ELSE 0 END)          AS has_view_item,
+  MAX(CASE WHEN eventName = 'add_to_cart'  THEN 1 ELSE 0 END)          AS has_add_to_cart,
+  MAX(CASE WHEN eventName = 'purchase'     THEN 1 ELSE 0 END)          AS has_purchase
+
+FROM ${ref("stg_events_sessionized")}
+GROUP BY final_session_id

@@ -1,0 +1,99 @@
+config {
+  type: "view",
+  schema: "moca_metrics_staging",
+  description: "Eventi cookieless con sessionizzazione. Grain: evento.",
+  tags: [dataform.projectConfig.vars.client_name, "staging", "sessions"]
+}
+
+WITH raw AS (
+  SELECT
+    sessionId                AS visit_id,
+    ts                       AS raw_ts,
+    page,
+    referrer,
+    device,
+    eventName,
+    revenue,
+    customParameter,
+    productInfo,
+    ROW_NUMBER() OVER (
+      PARTITION BY sessionId
+      ORDER BY ts
+    ) AS row_num
+  FROM ${ref(dataform.projectConfig.vars.source_table)}
+),
+
+ts_valid AS (
+  SELECT
+    *,
+    IF(raw_ts = 'undefined', NULL, SAFE_CAST(raw_ts AS INT64)) AS ts_int
+  FROM raw
+),
+
+-- Propaga l'ultimo timestamp valido in avanti (gestisce N 'undefined' consecutivi)
+ts_filled AS (
+  SELECT
+    *,
+    LAST_VALUE(ts_int IGNORE NULLS) OVER (
+      PARTITION BY visit_id
+      ORDER BY row_num
+      ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+    ) AS ts_int_filled
+  FROM ts_valid
+),
+
+ts_cast AS (
+  SELECT
+    visit_id,
+    TIMESTAMP_MILLIS(ts_int_filled) AS ts,
+    page,
+    referrer,
+    device,
+    eventName,
+    revenue,
+    customParameter,
+    productInfo
+  FROM ts_filled
+  WHERE ts_int_filled IS NOT NULL
+),
+
+session_breaks AS (
+  SELECT
+    *,
+    LAG(ts) OVER (PARTITION BY visit_id ORDER BY ts) AS previous_ts,
+    IF(
+      LAG(ts) OVER (PARTITION BY visit_id ORDER BY ts) IS NULL
+      OR TIMESTAMP_DIFF(ts, LAG(ts) OVER (PARTITION BY visit_id ORDER BY ts), SECOND)
+           > CAST(dataform.projectConfig.vars.session_timeout AS INT64)
+      OR DATE(ts, dataform.projectConfig.vars.timezone) != DATE(
+           LAG(ts) OVER (PARTITION BY visit_id ORDER BY ts),
+           dataform.projectConfig.vars.timezone
+         ),
+      1,
+      0
+    ) AS is_new_session
+  FROM ts_cast
+),
+
+session_numbered AS (
+  SELECT
+    *,
+    SUM(is_new_session) OVER (
+      PARTITION BY visit_id
+      ORDER BY ts
+    ) AS session_counter
+  FROM session_breaks
+)
+
+SELECT
+  visit_id,
+  ts,
+  CONCAT(visit_id, '_', CAST(session_counter AS STRING)) AS final_session_id,
+  page,
+  referrer,
+  device,
+  eventName,
+  revenue,
+  customParameter,
+  productInfo
+FROM session_numbered

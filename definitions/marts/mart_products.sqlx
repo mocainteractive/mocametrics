@@ -1,0 +1,57 @@
+config {
+  type: "table",
+  schema: "moca_metrics",
+  description: "Metriche prodotto aggregate. Grain: product_id + category + price + quantity + date.",
+  bigquery: {
+    partitionBy: "date",
+    clusterBy: ["product_id"]
+  },
+  tags: [dataform.projectConfig.vars.client_name, "mart", "products"]
+}
+
+WITH events AS (
+  SELECT
+    eventName,
+    productInfo,
+    ts
+  FROM ${ref("stg_events_sessionized")}
+  WHERE eventName IN ('view_item', 'add_to_cart', 'purchase')
+    AND productInfo IS NOT NULL
+    AND TRIM(productInfo) != ''
+),
+
+split_products AS (
+  SELECT
+    eventName,
+    ts,
+    TRIM(product_part) AS product_raw
+  FROM events,
+  UNNEST(SPLIT(productInfo, ';')) AS product_part
+  WHERE TRIM(product_part) != ''
+),
+
+-- Formato: id,name,category,price,quantity
+parsed AS (
+  SELECT
+    eventName,
+    DATE(ts, dataform.projectConfig.vars.timezone)                 AS date,
+    SPLIT(product_raw, ',')[SAFE_OFFSET(0)]                        AS product_id,
+    SPLIT(product_raw, ',')[SAFE_OFFSET(1)]                        AS product_name,
+    SPLIT(product_raw, ',')[SAFE_OFFSET(2)]                        AS product_category,
+    SAFE_CAST(SPLIT(product_raw, ',')[SAFE_OFFSET(3)] AS FLOAT64)  AS product_price,
+    SAFE_CAST(SPLIT(product_raw, ',')[SAFE_OFFSET(4)] AS INT64)    AS product_quantity
+  FROM split_products
+)
+
+SELECT
+  date,
+  product_id,
+  product_name,
+  product_category,
+  COALESCE(product_price,    0) AS product_price,
+  COALESCE(product_quantity, 1) AS product_quantity,
+  SUM(CASE WHEN eventName = 'view_item'   THEN 1 ELSE 0 END) AS view_item_count,
+  SUM(CASE WHEN eventName = 'add_to_cart' THEN 1 ELSE 0 END) AS add_to_cart_count,
+  SUM(CASE WHEN eventName = 'purchase'    THEN 1 ELSE 0 END) AS purchase_count
+FROM parsed
+GROUP BY date, product_id, product_name, product_category, product_price, product_quantity

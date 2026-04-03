@@ -1,0 +1,123 @@
+config {
+  type: "table",
+  schema: "moca_metrics",
+  description: "Sessioni con attribuzione canale. Grain: final_session_id. Tabella materializzata per Looker Studio.",
+  bigquery: {
+    partitionBy: "date",
+    clusterBy: ["channel_group", "device"]
+  },
+  tags: [dataform.projectConfig.vars.client_name, "mart", "sessions"]
+}
+
+WITH base AS (
+  SELECT
+    s.final_session_id,
+    s.visit_id,
+    DATE(s.session_start, dataform.projectConfig.vars.timezone)  AS date,
+    s.session_start,
+    s.session_end,
+    LEAST(s.session_duration_seconds, CAST(dataform.projectConfig.vars.session_timeout AS INT64))
+                                                                  AS session_duration,
+    s.device,
+    s.total_events,
+    s.total_revenue,
+    s.view_item_count,
+    s.add_to_cart_count,
+    s.generate_lead_count,
+    s.purchase_count,
+    s.page_view_count,
+    s.has_view_item,
+    s.has_add_to_cart,
+    s.has_purchase,
+    r.session_first_referrer,
+    r.session_best_referrer,
+    r.visit_first_referrer,
+    r.visit_best_referrer,
+    r.best_referrer_url,
+    r.referral_domain,
+    r.utm_source,
+    r.utm_medium,
+    r.utm_campaign,
+    r.gclid,
+    r.fbclid,
+    r.gbraid,
+    r.wbraid,
+    r.srsltid
+  FROM ${ref("int_session_summary")} s
+  LEFT JOIN ${ref("int_referrer_resolution")} r USING (final_session_id)
+),
+
+with_source_medium AS (
+  SELECT
+    *,
+
+    CASE
+      WHEN utm_source IS NOT NULL
+        THEN utm_source
+      WHEN REGEXP_CONTAINS(LOWER(best_referrer_url), r'(srsltid|gclid|google)')
+        THEN 'google'
+      WHEN REGEXP_CONTAINS(LOWER(best_referrer_url), r'bing')
+        THEN 'bing'
+      WHEN REGEXP_CONTAINS(LOWER(best_referrer_url), r'(facebook|fbclid|instagram)')
+        THEN 'facebook'
+      WHEN REGEXP_CONTAINS(LOWER(best_referrer_url), r'linkedin')
+        THEN 'linkedin'
+      WHEN REGEXP_CONTAINS(LOWER(best_referrer_url), r'duckduckgo')
+        THEN 'duckduckgo'
+      WHEN REGEXP_CONTAINS(LOWER(best_referrer_url), r'yahoo')
+        THEN 'yahoo'
+      WHEN REGEXP_CONTAINS(LOWER(best_referrer_url), r'(mailchimp|newsletter)')
+        THEN 'email'
+      WHEN referral_domain IS NOT NULL
+        THEN referral_domain
+      ELSE '(direct)'
+    END AS source,
+
+    CASE
+      WHEN utm_medium IS NOT NULL AND utm_medium != 'stories'
+        THEN utm_medium
+      WHEN gclid IS NOT NULL OR gbraid IS NOT NULL OR wbraid IS NOT NULL OR srsltid IS NOT NULL
+        THEN 'cpc'
+      WHEN fbclid IS NOT NULL OR utm_medium = 'stories'
+        THEN 'paid'
+      WHEN REGEXP_CONTAINS(LOWER(best_referrer_url), r'(google|bing|yahoo|duckduckgo)')
+        THEN 'organic'
+      WHEN REGEXP_CONTAINS(LOWER(best_referrer_url), r'(facebook|linkedin|instagram|twitter|pinterest|reddit)')
+        THEN 'social'
+      WHEN REGEXP_CONTAINS(LOWER(best_referrer_url), r'newsletter')
+        THEN 'email'
+      WHEN referral_domain IS NOT NULL
+        AND utm_medium IS NULL
+        AND NOT REGEXP_CONTAINS(LOWER(best_referrer_url), r'' || dataform.projectConfig.vars.client_domain || '')
+        AND utm_campaign IS NULL
+        THEN 'referral'
+      ELSE '(none)'
+    END AS medium
+
+  FROM base
+)
+
+SELECT
+  *,
+  CASE
+    WHEN LOWER(medium) IN ('direct', 'other', '(none)', '(direct)') THEN 'Direct'
+    WHEN LOWER(source) = '(direct)'                                  THEN 'Direct'
+    WHEN LOWER(medium) IN ('cpc', 'paidsearch', 'ppc')               THEN 'Paid Search'
+    WHEN LOWER(medium) = 'paid'                                       THEN 'Paid Social'
+    WHEN LOWER(medium) = 'organic'                                    THEN 'Organic Search'
+    WHEN LOWER(medium) = 'email'
+      OR REGEXP_CONTAINS(LOWER(source), r'(mailchimp|newsletter)')    THEN 'Email'
+    WHEN LOWER(medium) = 'referral'
+      THEN
+        CASE
+          WHEN REGEXP_CONTAINS(LOWER(source), r'(instagram|facebook|linkedin|pinterest|tiktok)')
+            THEN 'Organic Social'
+          ELSE 'Referral'
+        END
+    WHEN LOWER(medium) = 'social' AND LOWER(source) = 'facebook'     THEN 'Organic Social'
+    WHEN LOWER(medium) = 'affiliate'                                  THEN 'Affiliates'
+    WHEN LOWER(medium) = 'display'                                    THEN 'Display'
+    ELSE 'Unassigned'
+  END AS channel_group
+
+FROM with_source_medium

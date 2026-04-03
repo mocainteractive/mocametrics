@@ -1,0 +1,107 @@
+config {
+  type: "view",
+  schema: "moca_metrics_int",
+  description: "Risoluzione referrer prioritario e estrazione UTM/click-ID. Grain: final_session_id.",
+  tags: [dataform.projectConfig.vars.client_name, "intermediate", "referrer", "attribution"]
+}
+
+WITH session_visit_bridge AS (
+  SELECT DISTINCT
+    final_session_id,
+    visit_id
+  FROM ${ref("stg_events_sessionized")}
+),
+
+all_referrers AS (
+  SELECT
+    s.final_session_id,
+    s.session_first_referrer,
+    s.session_best_referrer,
+    s.min_ts,
+    s.max_ts,
+    v.visit_first_referrer,
+    v.visit_best_referrer
+  FROM ${ref("int_referrer_by_session")} s
+  JOIN session_visit_bridge b    USING (final_session_id)
+  JOIN ${ref("int_referrer_by_visit")} v ON v.visit_id = b.visit_id
+),
+
+resolved AS (
+  SELECT
+    *,
+    CASE
+      WHEN session_first_referrer IS NOT NULL
+        AND TRIM(session_first_referrer) != ''
+        AND NOT REGEXP_CONTAINS(LOWER(session_first_referrer), r'' || dataform.projectConfig.vars.client_domain || '')
+        AND REGEXP_CONTAINS(session_first_referrer, r'(?i)(utm_|gclid|fbclid)')
+      THEN session_first_referrer
+
+      WHEN session_best_referrer IS NOT NULL
+        AND TRIM(session_best_referrer) != ''
+        AND NOT REGEXP_CONTAINS(LOWER(session_best_referrer), r'' || dataform.projectConfig.vars.client_domain || '')
+        AND REGEXP_CONTAINS(session_best_referrer, r'(?i)(utm_|gclid|fbclid)')
+      THEN session_best_referrer
+
+      WHEN visit_first_referrer IS NOT NULL
+        AND TRIM(visit_first_referrer) != ''
+        AND NOT REGEXP_CONTAINS(LOWER(visit_first_referrer), r'' || dataform.projectConfig.vars.client_domain || '')
+        AND REGEXP_CONTAINS(visit_first_referrer, r'(?i)(utm_|gclid|fbclid)')
+      THEN visit_first_referrer
+
+      WHEN visit_best_referrer IS NOT NULL
+        AND TRIM(visit_best_referrer) != ''
+        AND NOT REGEXP_CONTAINS(LOWER(visit_best_referrer), r'' || dataform.projectConfig.vars.client_domain || '')
+        AND REGEXP_CONTAINS(visit_best_referrer, r'(?i)(utm_|gclid|fbclid)')
+      THEN visit_best_referrer
+
+      WHEN session_first_referrer IS NOT NULL AND TRIM(session_first_referrer) != ''
+        THEN session_first_referrer
+      WHEN session_best_referrer IS NOT NULL AND TRIM(session_best_referrer) != ''
+        THEN session_best_referrer
+      WHEN visit_first_referrer IS NOT NULL AND TRIM(visit_first_referrer) != ''
+        THEN visit_first_referrer
+      WHEN visit_best_referrer IS NOT NULL AND TRIM(visit_best_referrer) != ''
+        THEN visit_best_referrer
+
+      ELSE NULL
+    END AS best_referrer_url
+  FROM all_referrers
+)
+
+SELECT
+  final_session_id,
+  session_first_referrer,
+  session_best_referrer,
+  visit_first_referrer,
+  visit_best_referrer,
+  min_ts,
+  max_ts,
+  best_referrer_url,
+
+  REGEXP_EXTRACT(
+    LOWER(
+      REPLACE(REPLACE(REPLACE(best_referrer_url, '%3A', ':'), '%2F', '/'), '%3F', '?')
+    ),
+    r'https?://(?:www\.)?([^/?]+)'
+  ) AS referral_domain,
+
+  SAFE.REGEXP_EXTRACT(best_referrer_url, r'utm_source(?:%3D|=)([^%&]*)')   AS utm_source,
+  SAFE.REGEXP_EXTRACT(best_referrer_url, r'utm_medium(?:%3D|=)([^%&]*)')   AS utm_medium,
+
+  CASE
+    WHEN REGEXP_CONTAINS(best_referrer_url, r'utm_campaign(?:%3D|=)')
+    THEN
+      REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(
+        SAFE.REGEXP_EXTRACT(best_referrer_url, r'utm_campaign(?:%3D|=)([^&]*?)(?:%26|&|$)'),
+        '%255B', '['), '%255D', ']'), '%2B', '+'), '%20', ' '), '%2C', ','),
+        '%7C', '|'), '%3A', ':'), '%2F', '/'), '%3F', '?'), '%23', '#'), '%2520', ' ')
+    ELSE NULL
+  END AS utm_campaign,
+
+  SAFE.REGEXP_EXTRACT(best_referrer_url, r'gclid(?:%3D|=)([^%&]*)')    AS gclid,
+  SAFE.REGEXP_EXTRACT(best_referrer_url, r'fbclid(?:%3D|=)([^%&]*)')   AS fbclid,
+  SAFE.REGEXP_EXTRACT(best_referrer_url, r'gbraid(?:%3D|=)([^%&]*)')   AS gbraid,
+  SAFE.REGEXP_EXTRACT(best_referrer_url, r'wbraid(?:%3D|=)([^%&]*)')   AS wbraid,
+  SAFE.REGEXP_EXTRACT(best_referrer_url, r'srsltid(?:%3D|=)([^%&]*)') AS srsltid
+
+FROM resolved

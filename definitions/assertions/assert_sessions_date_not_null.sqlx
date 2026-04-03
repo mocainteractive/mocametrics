@@ -1,0 +1,9 @@
+config {
+  type: "assertion",
+  description: "Tutte le sessioni devono avere una data non nulla.",
+  tags: [dataform.projectConfig.vars.client_name, "assertions", "sessions"]
+}
+
+SELECT *
+FROM ${ref("mart_sessions")}
+WHERE date IS NULL

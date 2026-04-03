@@ -1,0 +1,22 @@
+config {
+  type: "table",
+  schema: "moca_metrics",
+  description: "Visualizzazioni di pagina aggregate per data e dispositivo. Grain: page + date + device.",
+  bigquery: {
+    partitionBy: "date",
+    clusterBy: ["device"]
+  },
+  tags: [dataform.projectConfig.vars.client_name, "mart", "pages"]
+}
+
+SELECT
+  REPLACE(page, '%2F', '/')                             AS page,
+  DATE(ts, dataform.projectConfig.vars.timezone)        AS date,
+  device,
+  COUNT(CASE WHEN eventName = 'page_view' THEN 1 END)   AS page_view_count,
+  COUNT(*)                                              AS total_events,
+  COUNT(DISTINCT final_session_id)                      AS session_count
+
+FROM ${ref("stg_events_sessionized")}
+WHERE page IS NOT NULL
+GROUP BY page, date, device

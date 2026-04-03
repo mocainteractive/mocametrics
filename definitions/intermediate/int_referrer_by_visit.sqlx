@@ -1,0 +1,29 @@
+config {
+  type: "view",
+  schema: "moca_metrics_int",
+  description: "Referrer migliore e primo per visita. Grain: visit_id.",
+  tags: [dataform.projectConfig.vars.client_name, "intermediate", "referrer"]
+}
+
+SELECT
+  visit_id,
+
+  ARRAY_AGG(referrer IGNORE NULLS ORDER BY ts ASC LIMIT 1)[SAFE_OFFSET(0)]
+    AS visit_first_referrer,
+
+  ARRAY_AGG(
+    CASE
+      WHEN referrer IS NOT NULL
+        AND TRIM(referrer) != ''
+        AND REGEXP_CONTAINS(referrer, r'(?i)(utm_|gclid|gbraid|fbclid|google\.com)')
+      THEN referrer
+      ELSE NULL
+    END
+    IGNORE NULLS
+    ORDER BY ts ASC
+    LIMIT 1
+  )[SAFE_OFFSET(0)]
+    AS visit_best_referrer
+
+FROM ${ref("stg_events_sessionized")}
+GROUP BY visit_id
