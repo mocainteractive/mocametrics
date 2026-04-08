@@ -29,6 +29,7 @@ WITH session_landing AS (
     ) AS landing_page
   FROM ${ref("stg_events_sessionized")}
   GROUP BY final_session_id
+  
 ),
 
 -- Metriche di sessione già a grain corretto da int_session_summary
@@ -49,6 +50,7 @@ session_metrics AS (
   FROM ${ref("int_session_summary")} s
   JOIN session_landing p USING (final_session_id)
     ${when(incremental(), `WHERE DATE(s.session_start, "${dataform.projectConfig.vars.timezone}") >= DATE_SUB(CURRENT_DATE(), INTERVAL 3 DAY)`)}
+
 
 )
 
