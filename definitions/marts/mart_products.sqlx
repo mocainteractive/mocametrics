@@ -1,12 +1,14 @@
 config {
-  type: "table",
+  type: "incremental",
   schema: "moca_metrics",
-  description: "Metriche prodotto aggregate. Grain: product_id + category + price + quantity + date. Sostituisce looker_products.",
+  description: "Metriche prodotto aggregate. Grain: product_id + category + price + quantity + date. Incremental: aggiorna solo gli ultimi 3 giorni.",
   bigquery: {
     partitionBy: "date",
-    clusterBy: ["product_id"]
+    clusterBy: ["product_id"],
+    updatePartitionFilter: "date >= DATE_SUB(CURRENT_DATE(), INTERVAL 3 DAY)"
   },
-  tags: ["mart", "products"]
+  uniqueKey: ["date", "product_id", "product_name", "product_category", "product_price", "product_quantity"],
+  tags: [dataform.projectConfig.vars.client_name, "mart", "products"]
 }
 
 -- FIX CRITICO offset colonne (formato confermato: id,name,category,price,quantity)
@@ -24,6 +26,8 @@ WITH events AS (
   WHERE eventName IN ('view_item', 'add_to_cart', 'purchase')
     AND productInfo IS NOT NULL
     AND TRIM(productInfo) != ''
+        ${when(incremental(), `AND DATE(ts, "${dataform.projectConfig.vars.timezone}") >= DATE_SUB(CURRENT_DATE(), INTERVAL 3 DAY)`)}
+
 ),
 
 -- Split per prodotto (separatore ";")

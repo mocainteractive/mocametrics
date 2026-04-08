@@ -1,12 +1,14 @@
 config {
-  type: "table",
+  type: "incremental",
   schema: "moca_metrics",
-  description: "Visualizzazioni di pagina aggregate per data e dispositivo. Grain: page + date + device. Sostituisce looker_pages.",
+  description: "Visualizzazioni di pagina aggregate per data e dispositivo. Grain: page + date + device. Incremental: aggiorna solo gli ultimi 3 giorni.",
   bigquery: {
     partitionBy: "date",
-    clusterBy: ["device"]
+    clusterBy: ["device"],
+    updatePartitionFilter: "date >= DATE_SUB(CURRENT_DATE(), INTERVAL 3 DAY)"
   },
-  tags: ["mart", "pages"]
+  uniqueKey: ["page", "date", "device"],
+  tags: [dataform.projectConfig.vars.client_name, "mart", "pages"]
 }
 
 -- FIX CRITICO: nell'originale looker_pages il GROUP BY includeva ts (timestamp grezzo
@@ -23,4 +25,7 @@ SELECT
 
 FROM ${ref("stg_events_sessionized")}
 WHERE page IS NOT NULL
+${when(incremental(), `AND DATE(ts, "${dataform.projectConfig.vars.timezone}") >= DATE_SUB(CURRENT_DATE(), INTERVAL 3 DAY)`)}
+
 GROUP BY page, date, device
+
