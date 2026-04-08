@@ -1,13 +1,16 @@
 config {
-  type: "table",
+  type: "incremental",
   schema: "moca_metrics",
-  description: "Metriche di sessione per landing page. Grain: final_session_id. Sostituisce looker_landings.",
+  description: "Metriche di sessione per landing page. Grain: final_session_id. Incremental: aggiorna solo gli ultimi 3 giorni.",
   bigquery: {
     partitionBy: "date",
-    clusterBy: ["channel_group", "device"]
+    clusterBy: ["channel_group", "device"],
+    updatePartitionFilter: "date >= DATE_SUB(CURRENT_DATE(), INTERVAL 3 DAY)"
   },
-  tags: ["mart", "landings"]
+  uniqueKey: ["final_session_id"],
+  tags: [dataform.projectConfig.vars.client_name, "mart", "landings"]
 }
+
 
 -- FIX CRITICO: nell'originale looker_landings c'era un doppio JOIN a looker_session
 -- (una volta nella CTE landing1 e una volta nel SELECT finale), con rischio concreto
@@ -26,6 +29,7 @@ WITH session_landing AS (
     ) AS landing_page
   FROM ${ref("stg_events_sessionized")}
   GROUP BY final_session_id
+  
 ),
 
 -- Metriche di sessione già a grain corretto da int_session_summary
@@ -45,6 +49,9 @@ session_metrics AS (
     1                                     AS session_count
   FROM ${ref("int_session_summary")} s
   JOIN session_landing p USING (final_session_id)
+    ${when(incremental(), `WHERE DATE(s.session_start, "${dataform.projectConfig.vars.timezone}") >= DATE_SUB(CURRENT_DATE(), INTERVAL 3 DAY)`)}
+
+
 )
 
 -- Arricchimento con dati di attribuzione — JOIN unico a mart_sessions

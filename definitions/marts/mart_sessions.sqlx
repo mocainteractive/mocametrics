@@ -1,12 +1,11 @@
 config {
-  type: "table",
-  schema: "moca_metrics",
-  description: "Sessioni con attribuzione canale. Grain: final_session_id. Tabella materializzata per Looker Studio. Sostituisce looker_session.",
+  type: "incremental",
   bigquery: {
     partitionBy: "date",
-    clusterBy: ["channel_group", "device"]
+    clusterBy: ["channel_group", "device"],
+    updatePartitionFilter: "date >= DATE_SUB(CURRENT_DATE(), INTERVAL 3 DAY)"
   },
-  tags: ["mart", "sessions"]
+  tags: [dataform.projectConfig.vars.client_name, "mart", "sessions"]
 }
 
 WITH base AS (
@@ -47,6 +46,9 @@ WITH base AS (
     r.srsltid
   FROM ${ref("int_session_summary")} s
   LEFT JOIN ${ref("int_referrer_resolution")} r USING (final_session_id)
+  ${ when(incremental(), `WHERE DATE(s.session_start, "${dataform.projectConfig.vars.timezone}") 
+   >= DATE_SUB(CURRENT_DATE(), INTERVAL 3 DAY)`) }
+
 ),
 
 with_source_medium AS (

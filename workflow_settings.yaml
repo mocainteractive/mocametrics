@@ -1,31 +1,17 @@
-# ============================================================
-# MOCA INTERACTIVE — DATAFORM TEMPLATE
-# ============================================================
-# Unico file da modificare per ogni nuovo cliente.
-# Sostituisci i valori sotto con quelli del cliente.
-# ============================================================
+defaultProject: lithe-vent-382809       # es. bofrost-data-import
+defaultLocation: europe-west3
 
-defaultProject: CLIENT_PROJECT_ID       # es. bofrost-data-import
-defaultLocation: EU
 defaultDataset: moca_metrics
 defaultAssertionDataset: moca_metrics_assertions
 
 vars:
-  # Identificativo cliente (usato nei tag e nei log)
-  client_name: CLIENT_NAME              # es. bofrost
+  client_name: smegit              # es. bofrost
+  source_project: lithe-vent-382809     # es. bofrost-data-import
 
-  # Progetto GCP dove si trova la raw table
-  source_project: CLIENT_PROJECT_ID     # es. bofrost-data-import
-
-  # Dataset BigQuery dove si trova la raw table
-  source_dataset: CLIENT_SOURCE_DATASET # es. moca_metrics
-
-  # Nome della tabella sorgente (di solito non cambia)
+  source_dataset: moca_metrics
   source_table: cookieless_raw_data
 
-  # Dominio del sito del cliente — usato per escludere traffico interno
-  # dal calcolo del referrer (es. bofrost.it, topfarmacia.it)
-  client_domain: CLIENT_DOMAIN          # es. bofrost.it
+  client_domain: smeg.com          # es. bofrost.it
 
   # Timezone del cliente per il calcolo delle date e delle sessioni
   timezone: Europe/Rome
