@@ -1,5 +1,6 @@
 defaultProject: lithe-vent-382809       # es. bofrost-data-import
-defaultLocation: EU
+defaultLocation: europe-west3
+
 defaultDataset: moca_metrics
 defaultAssertionDataset: moca_metrics_assertions
 
